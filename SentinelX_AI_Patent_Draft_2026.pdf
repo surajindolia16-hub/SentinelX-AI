@@ -1,0 +1,35 @@
++-----------------------------------------------------------------------------------------+
+|                        PATENT APPLICATION: DRAFT FOR SENTINELX AI                       |
++-----------------------------------------------------------------------------------------+
+|                                                                                         |
+| 1. TITLE OF THE INVENTION:                                                              |
+|    "An AI-Driven Multi-Agent System for Real-Time Disaster Risk Assessment and          |
+|    Automated Emergency Orchestration."                                                  |
+|                                                                                         |
+| 2. FIELD OF THE INVENTION:                                                              |
+|    Disaster Management, Artificial Intelligence, Multi-Agent Systems (MAS).             |
+|                                                                                         |
+| 3. BACKGROUND OF THE INVENTION:                                                         |
+|    Existing systems rely on manual input and static thresholds. There is a lack of      |
+|    autonomous reasoning systems capable of context-aware emergency decision-making.     |
+|                                                                                         |
+| 4. SUMMARY OF THE INVENTION:                                                            |
+|    SentinelX AI is a multi-agent architecture utilizing an Reasoning Agent (LLM-based)  |
+|    to perform dynamic risk assessment, and a Decision Agent to trigger autonomous       |
+|    alerts, integrated with a persistence layer for historical trend learning.           |
+|                                                                                         |
+| 5. DETAILED DESCRIPTION:                                                                |
+|    The system processes environmental variables (rainfall, river level, temp) and       |
+|    demographic inputs (DOB, Location) to compute a high-precision Risk Score. The        |
+|    innovation lies in providing personalized safety instructions based on user          |
+|    metadata (Age) and real-time environment intelligence.                               |
+|                                                                                         |
+| 6. CLAIMS:                                                                              |
+|    Claim 1: A method for disaster assessment comprising a multi-agent system that       |
+|             decouples reasoning from decision-making using LLMs.                        |
+|    Claim 2: The integration of user-specific demographic data into disaster risk        |
+|             calculations to provide personalized, localized emergency guidance.         |
+|    Claim 3: An autonomous workflow that self-optimizes decision parameters via          |
+|             historical data analysis in a persistent memory layer.                      |
+|                                                                                         |
++-----------------------------------------------------------------------------------------+
