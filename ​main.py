@@ -1,88 +1,57 @@
-# SentinelX AI: Autonomous Disaster Intelligence System
-# Developed for Google Cloud Rapid Agent Hackathon 2026
 
-import os
-import json
-import time
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import google.generativeai as genai
-from pymongo import MongoClient
+# --- 1. CORE MODELS: src/core/validator.py ---
+from pydantic import BaseModel, Field
 
-# Initialize App
-app = FastAPI(title="SentinelX AI")
+class SensorData(BaseModel):
+    rain_mm: float = Field(..., ge=0, le=1000)
+    river_level_m: float = Field(..., ge=0, le=50)
+    elevation_m: float = Field(..., ge=-10, le=8000)
 
-# --- Configuration ---
-# Note: Use environment variables for production security
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-client = MongoClient(os.getenv("MONGODB_URI"))
-db = client.disaster_data
+# --- 2. LOGIC ENGINE: src/core/risk_engine.py ---
+class RiskCalculator:
+    _COEFFICIENTS = {"rain_mm": 0.55, "river_level_m": 0.35, "elevation_m": -0.10}
 
-# --- Data Models ---
-class DisasterInput(BaseModel):
-    username: str
-    dob: str  # YYYY-MM-DD
-    location: str
-    rainfall_mm: float
-    river_level: float
-    temperature: float
+    def compute_risk(self, data: SensorData) -> float:
+        risk = sum(getattr(data, k) * self._COEFFICIENTS[k] for k in self._COEFFICIENTS)
+        return max(0.0, min(100.0, risk))
 
-# --- Agent 1: Reasoning Agent (The Brain) ---
-class ReasoningAgent:
-    def get_assessment(self, data: dict):
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"""
-        Analyze disaster risk for {data['location']}. 
-        User Age Calculation: 2026 - {int(data['dob'].split('-')[0])}.
-        Inputs: {data}. 
-        Return ONLY a JSON with 'risk_score' (0-100), 'reasoning', and 'safety_instruction'.
-        """
-        response = model.generate_content(prompt)
-        # Cleaning the response to get pure JSON
-        clean_text = response.text.replace('```json', '').replace('```', '')
-        return json.loads(clean_text)
+# --- 3. INFRASTRUCTURE: src/services/hydrology.py ---
+import httpx
+import logging
+from tenacity import retry, stop_after_attempt, wait_exponential
 
-# --- Agent 2: Decision Agent ---
-class DecisionAgent:
-    def get_action(self, score: float):
-        if score > 70: return "CRITICAL: Immediate Evacuation Needed"
-        if score > 40: return "MEDIUM: Increase Monitoring"
-        return "LOW: Normal Status"
+logger = logging.getLogger("sentinelx")
 
-# --- Coordinator: The Orchestrator ---
-class SentinelXCoordinator:
-    def __init__(self):
-        self.reasoner = ReasoningAgent()
-        self.decision = DecisionAgent()
+class HydrologyService:
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    async def fetch_sensor_data(self, lat: float, lon: float) -> dict:
+        # Replace with your actual production endpoint
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            try:
+                resp = await client.get(f"https://api.disaster-sensor.gov/v1/data?lat={lat}&lon={lon}")
+                resp.raise_for_status()
+                return resp.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Hydrology API Failure: {e}")
+                raise
 
-    def process_data(self, data: DisasterInput):
-        # 1. Reasoning
-        assessment = self.reasoner.get_assessment(data.dict())
-        
-        # 2. Decision
-        action = self.decision.get_action(assessment['risk_score'])
-        
-        # 3. Persistence
-        report = {
-            **data.dict(),
-            **assessment,
-            "action": action,
-            "timestamp": time.ctime()
-        }
-        db.reports.insert_one(report)
-        
-        return report
+# --- 4. EXECUTION FLOW: src/main.py ---
+import asyncio
+from src.core.validator import SensorData
+from src.core.risk_engine import RiskCalculator
+from src.services.hydrology import HydrologyService
 
-system = SentinelXCoordinator()
+async def run_system():
+    # Setup
+    svc = HydrologyService()
+    calc = RiskCalculator()
+    
+    # Workflow
+    raw_data = await svc.fetch_sensor_data(27.17, 78.00)
+    valid_data = SensorData(**raw_data)
+    risk_score = calc.compute_risk(valid_data)
+    
+    print(f"Computed Risk Score: {risk_score:.2f}")
 
-# --- API Endpoints ---
-@app.post("/analyze")
-def analyze(data: DisasterInput):
-    try:
-        return system.process_data(data)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"System Error: {str(e)}")
-
-@app.get("/")
-def health_check():
-    return {"status": "SentinelX AI is running and ready for deployment"}
+if __name__ == "__main__":
+    asyncio.run(run_system())
