@@ -1,2 +1,2 @@
-# SentinelX-AI
-An autonomous disaster intelligence system leveraging Gemini AI for risk assessment, MongoDB for data persistence, and a multi-agent orchestration workflow. Built for the Google Cloud Rapid Agent Hackathon 2026.
+SentinelX AI: Autonomous Disaster Intelligence System
+​SentinelX AI ek advanced, agent-based disaster management system hai jo real-time data analyze karke instant risk assessment aur actionable recommendations provide karta hai. Yeh project Google Cloud Rapid Agent Hackathon ke liye build kiya gaya hai. 
