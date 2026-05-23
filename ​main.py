@@ -1,202 +1,108 @@
 import os
 import time
 import logging
-from typing import TypedDict, List, Dict, Annotated
-
+import asyncio
 import httpx
+from fastapi import FastAPI
 from motor.motor_asyncio import AsyncIOMotorClient
-from langgraph.graph import StateGraph, END
-import operator
 
-# -------------------------
-# LOGGING / OBSERVABILITY
-# -------------------------
+app = FastAPI(title="SentinelX - Disaster Risk Agent")
+
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("SentinelX")
+log = logging.getLogger("sentinelx")
+
+
+def info(msg):
+    log.info(msg)
 
 
 # -------------------------
-# STATE (SYSTEM MEMORY)
+# WEATHER (REAL API)
 # -------------------------
-class SentinelState(TypedDict):
-    location: Dict
-    sensor_data: Dict
-    risk_score: float
-    historical_context: List[Dict]
-    resources: List[Dict]
-    decision: str
-    audit: Annotated[List[str], operator.add]
-
-
-# -------------------------
-# OBSERVABILITY (LIGHTWEIGHT OTEL STYLE)
-# -------------------------
-class Span:
-    def __init__(self, name):
-        self.name = name
-
-    def __enter__(self):
-        self.start = time.time()
-        logger.info(f"[SPAN START] {self.name}")
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        logger.info(f"[SPAN END] {self.name} | {time.time() - self.start:.4f}s")
-
-
-def tracer(name):
-    return Span(name)
-
-
-# -------------------------
-# 1. WEATHER INGESTION NODE
-# -------------------------
-async def weather_node(state: SentinelState):
-    with tracer("weather_fetch"):
-
-        async with httpx.AsyncClient() as client:
-            # simulated API (replace with real OpenWeather)
-            data = {
-                "rain": 80,
-                "river": 70,
-                "elev": 20
-            }
-
+async def weather(lat, lon):
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": lat,
+                    "longitude": lon,
+                    "current_weather": True
+                }
+            )
+        data = r.json().get("current_weather", {})
         return {
-            "sensor_data": data,
-            "audit": ["Weather data ingested"]
+            "temp": data.get("temperature", 25),
+            "wind": data.get("windspeed", 10)
         }
+    except:
+        info("weather fallback used")
+        return {"temp": 25, "wind": 10}
 
 
 # -------------------------
-# 2. SEMANTIC MEMORY (VECTOR STYLE MOCK)
+# MEMORY (MongoDB)
 # -------------------------
-async def memory_node(state: SentinelState):
-    with tracer("historical_memory"):
+async def history(region):
+    try:
+        client = AsyncIOMotorClient(os.getenv("MONGO_URI", "mongodb://localhost:27017"))
+        db = client.sentinelx
 
-        client = AsyncIOMotorClient(os.getenv("MONGO_URI"))
-        db = client.sentinel
+        return await db.disasters.find(
+            {"region": region}
+        ).to_list(5)
 
-        # simplified aggregation (vector search concept hook)
-        history = await db.disasters.find(
-            {"sector": state["location"]["sector"]}
-        ).to_list(length=10)
-
-        return {
-            "historical_context": history,
-            "audit": ["Historical patterns retrieved"]
-        }
+    except:
+        info("mongo fallback used")
+        return []
 
 
 # -------------------------
-# 3. PURE MATHEMATICAL RISK ENGINE
+# SIMPLE RISK THINKING
 # -------------------------
-def risk_node(state: SentinelState):
-    with tracer("risk_engine"):
-
-        data = state["sensor_data"]
-
-        # deterministic formula (NO AI)
-        score = (
-            data["rain"] * 0.6 +
-            data["river"] * 0.4 -
-            data["elev"] * 0.1
-        )
-
-        score = max(0, min(100, score))
-
-        return {
-            "risk_score": score,
-            "audit": [f"Risk computed deterministically: {score}"]
-        }
+def risk_score(weather, hist_len):
+    score = (weather["wind"] * 0.7) + (weather["temp"] * 0.2) + (hist_len * 6)
+    return min(round(score, 2), 100)
 
 
 # -------------------------
-# 4. DECISION ENGINE (RULE BASED)
+# DECISION LOGIC
 # -------------------------
-def decision_node(state: SentinelState):
-    with tracer("decision_engine"):
-
-        score = state["risk_score"]
-
-        if score >= 75:
-            decision = "CRITICAL_EVACUATION"
-        elif score >= 50:
-            decision = "HIGH_ALERT"
-        elif score >= 25:
-            decision = "MONITOR"
-        else:
-            decision = "NORMAL"
-
-        return {
-            "decision": decision,
-            "audit": [f"Decision generated: {decision}"]
-        }
+def decision(score):
+    if score > 80:
+        return "EVACUATION"
+    if score > 60:
+        return "HIGH_ALERT"
+    if score > 30:
+        return "WATCH"
+    return "SAFE"
 
 
 # -------------------------
-# 5. RESOURCE ENGINE (RULE BASED)
+# MAIN PIPELINE
 # -------------------------
-def resource_node(state: SentinelState):
-    with tracer("resource_engine"):
+@app.post("/analyze")
+async def analyze(payload: dict):
 
-        score = state["risk_score"]
+    loc = payload.get("location", {})
+    region = loc.get("region", "unknown")
 
-        if score > 70:
-            resources = [
-                {"type": "Shelter", "priority": "HIGH"},
-                {"type": "Hospital", "priority": "HIGH"},
-                {"type": "Evac Route", "priority": "ACTIVE"}
-            ]
-        else:
-            resources = [
-                {"type": "Monitoring Mode", "priority": "LOW"}
-            ]
+    info(f"processing region: {region}")
 
-        return {
-            "resources": resources,
-            "audit": ["Resources allocated based on risk score"]
-        }
+    weather_task = weather(loc.get("lat"), loc.get("lon"))
+    history_task = history(region)
 
+    w, h = await asyncio.gather(weather_task, history_task)
 
-# -------------------------
-# 6. FINAL REPORT (NO AI)
-# -------------------------
-def report_node(state: SentinelState):
-    with tracer("report_generator"):
+    score = risk_score(w, len(h))
+    action = decision(score)
 
-        report = {
-            "location": state["location"],
-            "risk_score": state["risk_score"],
-            "decision": state["decision"],
-            "resources": state["resources"],
-            "historical_events": len(state["historical_context"]),
-            "system": "SentinelX Deterministic Disaster Engine"
-        }
-
-        logger.info("Final report generated")
-
-        return {"report": report}
-
-
-# -------------------------
-# GRAPH WORKFLOW
-# -------------------------
-workflow = StateGraph(SentinelState)
-
-workflow.add_node("weather", weather_node)
-workflow.add_node("memory", memory_node)
-workflow.add_node("risk", risk_node)
-workflow.add_node("decision", decision_node)
-workflow.add_node("resource", resource_node)
-workflow.add_node("report", report_node)
-
-workflow.set_entry_point("weather")
-
-workflow.add_edge("weather", "memory")
-workflow.add_edge("memory", "risk")
-workflow.add_edge("risk", "decision")
-workflow.add_edge("decision", "resource")
-workflow.add_edge("resource", "report")
-workflow.add_edge("report", END)
-
-app = workflow.compile()
+    return {
+        "system": "SentinelX",
+        "region": region,
+        "risk": score,
+        "decision": action,
+        "weather": w,
+        "history_count": len(h),
+        "note": "simple real-time risk scoring system"
+    }
